@@ -24,7 +24,6 @@ main :: proc() {
 		}
 	}
 
-	// FIXME: 5638 and 2819 and 2816 too high
 	fmt.println("Sum: ", sum)
 }
 
@@ -89,16 +88,6 @@ is_x_occurence :: proc(array: [MAX_ARRAY_SIZE][MAX_ARRAY_SIZE]rune, position: Ve
 		}
 
 		return up_left_down_right && down_left_up_right
-
-		// if row == 3 && col == 8 {
-		// 	fmt.println(position)
-		// 	fmt.println("center: ", center)
-		// 	fmt.println("up_left: ", up_left)
-		// 	fmt.println("up_right: ", up_right)
-		// 	fmt.println("down_right: ", down_right)
-		// 	fmt.println("down_left: ", down_left)
-		// }
-
 	}
 
 	return false
