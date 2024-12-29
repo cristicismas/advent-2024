@@ -32,6 +32,8 @@ main :: proc() {
 
 fix_row :: proc(row: ^string, rules: [dynamic]string) {
 	pages := strings.split(row^, ",")
+
+	// Need to clone pages to be able to work with a dynamic array
 	pages_dynamic := make([dynamic]string, len(pages), len(pages))
 	copy(pages_dynamic[:], pages[:])
 
