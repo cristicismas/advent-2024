@@ -3,6 +3,7 @@ package main
 import sa "core:container/small_array"
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:os"
 import "core:strconv"
 import "core:strings"
@@ -16,6 +17,26 @@ Operator :: enum {
 main :: proc() {
 	lines := read_lines("./sample_input.txt")
 
+	when ODIN_DEBUG {
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		context.allocator = mem.tracking_allocator(&track)
+
+		defer {
+			if len(track.allocation_map) > 0 {
+				for _, entry in track.allocation_map {
+					fmt.eprintf("%v leaked %v bytes\n", entry.location, entry.size)
+				}
+			}
+			if len(track.bad_free_array) > 0 {
+				for entry in track.bad_free_array {
+					fmt.eprintf("%v bad free at %v\n", entry.location, entry.memory)
+				}
+			}
+			mem.tracking_allocator_destroy(&track)
+		}
+	}
+
 	sum := 0
 	computed_lines := 0
 
@@ -24,8 +45,12 @@ main :: proc() {
 		defer delete(cache)
 
 		split, _err := strings.split(line, ": ")
+		defer delete(split)
+
 		result := split[0]
+
 		values := strings.split(split[1], " ")
+		defer delete(values)
 
 		result_int, ok := strconv.parse_int(result, 10)
 
@@ -51,6 +76,8 @@ main :: proc() {
 is_result_correct :: proc(result: int, values: []string, cache: ^map[string]struct {}) -> bool {
 	operators := get_operator_permutations(len(values), cache)
 	fmt.println("operators: ", operators)
+	fmt.println("operator permutations length: ", len(operators))
+
 	defer delete(operators)
 
 	int_values := str_array_to_int(values)
@@ -74,6 +101,7 @@ is_result_correct :: proc(result: int, values: []string, cache: ^map[string]stru
 			case Operator.CONCAT:
 				perm_result_str := int_to_str(permutation_result)
 				concatenated_string := strings.concatenate({perm_result_str, values[value_index]})
+				defer delete(concatenated_string)
 				concat_int, _ok := strconv.parse_int(concatenated_string, 10)
 				permutation_result = concat_int
 			}
@@ -82,6 +110,7 @@ is_result_correct :: proc(result: int, values: []string, cache: ^map[string]stru
 		}
 
 		if permutation_result == result {
+			// TODO: print the correct permutation?
 			return true
 		}
 	}
@@ -136,36 +165,42 @@ get_operator_permutations :: proc(values: int, cache: ^map[string]struct {}) -> 
 		Operator.MULTIPLY,
 		cache,
 	)
+	defer delete(plus_variant_permutations)
 
-	defer {
-		for perm in plus_variant_permutations {
-			delete(perm)
-		}
-		delete(plus_variant_permutations)
-	}
-
-
-	permutations := make([dynamic][]Operator, 0, len(plus_variant_permutations) + 1)
-
+	VARIANT_TYPES :: 3
+	permutations_capacity := pow(VARIANT_TYPES, values - 1)
+	permutations := make([dynamic][]Operator, 0, permutations_capacity)
 
 	append(&permutations, initial_permutation[:])
 	append(&permutations, ..plus_variant_permutations)
 
-	clear(cache)
-	for permutation in plus_variant_permutations {
-		concat_variant_permutations := get_variant_permutations(
-			permutation,
-			Operator.CONCAT,
-			cache,
-		)
-		defer delete(concat_variant_permutations)
-
-		append(&permutations, ..concat_variant_permutations)
+	for permutation in permutations {
+		multiply_variants := get_variant_permutations(permutation, Operator.MULTIPLY, cache)
+		defer delete(multiply_variants)
+		append(&permutations, ..multiply_variants)
 	}
+
+	for permutation in permutations {
+		concat_variants := get_variant_permutations(permutation, Operator.CONCAT, cache)
+		defer delete(concat_variants)
+		append(&permutations, ..concat_variants)
+	}
+
+	clear(cache)
+	free_all(context.temp_allocator)
 
 	return permutations[:]
 }
 
+pow :: proc(initial: int, times: int) -> int {
+	result := initial
+
+	for i in 1 ..< times {
+		result *= initial
+	}
+
+	return result
+}
 
 get_variant_permutations :: proc(
 	variant: []Operator,
@@ -174,26 +209,22 @@ get_variant_permutations :: proc(
 ) -> [][]Operator {
 	permutations := make([dynamic][]Operator, 0, len(variant))
 
-	for operator, index in variant {
-		// TODO: this current_permutation needs to get cleared at some point. I think this is what fills up all the ram
-		// USE TEMP ALLOCATOR?
-		current_permutation := make([dynamic]Operator, len(variant))
+	current_permutation: [dynamic]Operator
+
+	for _operator, index in variant {
+		current_permutation = make([dynamic]Operator, len(variant))
 		copy_variant(&current_permutation, variant)
 
 		current_permutation[index] = new_operator
 
 		operators_string := get_operators_string(current_permutation[:])
-		_, in_cache := cache[operators_string]
+
+		in_cache := operators_string in cache
 
 		if !in_cache {
 			append(&permutations, current_permutation[:])
 			cache[operators_string] = {}
 		}
-	}
-
-	for permutation in permutations {
-		new_variants := get_variant_permutations(permutation, Operator.MULTIPLY, cache)
-		append(&permutations, ..new_variants)
 	}
 
 	return permutations[:]
@@ -223,6 +254,7 @@ copy_variant :: proc(destination: ^[dynamic]Operator, source: []Operator) -> (ok
 
 get_operators_string :: proc(operators: []Operator) -> string {
 	string_operators := make([dynamic]string, len(operators))
+	defer delete(string_operators)
 
 	for operator in operators {
 		switch operator {
@@ -235,7 +267,7 @@ get_operators_string :: proc(operators: []Operator) -> string {
 		}
 	}
 
-	joined_string := strings.join(string_operators[:], "")
+	joined_string := strings.join(string_operators[:], "", context.temp_allocator)
 
 	return joined_string
 }
